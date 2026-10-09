@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { parseHtmlPrice } from "./html-price";
+import { parseHtmlPrice, parseStructuredPrice } from "./html-price";
 
 const tote = `
 <!doctype html>
@@ -70,5 +70,47 @@ describe("HTML 价格解析", () => {
   it("解析不到价格时返回 null", () => {
     assert.equal(parseHtmlPrice("<html><title>空页面</title></html>").price, null);
     assert.equal(parseHtmlPrice("<html><title>空页面</title></html>").title, "空页面");
+  });
+
+  it("Offer 没有 price 时读取 priceSpecification，并分开标价和售价", () => {
+    const html = `
+      <script type="application/ld+json">
+        {
+          "@type": "Product",
+          "name": "演示降噪耳机",
+          "offers": {
+            "@type": "Offer",
+            "priceCurrency": "CNY",
+            "priceSpecification": [
+              { "@type": "UnitPriceSpecification", "price": "8999", "priceType": "https://schema.org/ListPrice" },
+              { "@type": "UnitPriceSpecification", "price": "7999", "priceType": "https://schema.org/SalePrice" }
+            ]
+          }
+        }
+      </script>`;
+    const parsed = parseStructuredPrice(html);
+    assert.equal(parsed.price, 7999);
+    assert.equal(parsed.listPrice, 8999);
+    assert.equal(parsed.currency, "CNY");
+  });
+
+  it("同时有外币和人民币报价时保留人民币", () => {
+    const html = `
+      <script type="application/ld+json">
+        {
+          "@graph": [
+            { "@type": "Offer", "price": "199", "priceCurrency": "USD" },
+            { "@type": "Product", "name": "演示耳机", "offers": { "@type": "Offer", "price": "1499", "priceCurrency": "CNY" } }
+          ]
+        }
+      </script>`;
+    const parsed = parseStructuredPrice(html);
+    assert.equal(parsed.price, 1499);
+    assert.equal(parsed.currency, "CNY");
+    assert.equal(parsed.title, "演示耳机");
+  });
+
+  it("itemprop 没有 content 时读取标签文本", () => {
+    assert.equal(parseHtmlPrice(`<title>杯子</title><span itemprop="price">¥239.50</span>`).price, 239.5);
   });
 });

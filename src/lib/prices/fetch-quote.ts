@@ -1,13 +1,32 @@
-import { parseHtmlPrice } from "@/lib/html-price";
+import { matchBrandSite, quoteBrand } from "@/lib/prices/adapters/brand";
+import { quoteHtml } from "@/lib/prices/adapters/html";
+import { isJdHost, quoteJd } from "@/lib/prices/adapters/jd";
 import { findMockProduct, quoteMock } from "@/lib/prices/mock";
+import { loadPage, type PageLoader } from "@/lib/prices/page";
 import type { Quote } from "@/lib/prices/types";
 
-const MAX_HTML_BYTES = 1_000_000;
+export type FetchQuoteOptions = {
+  loadPage?: PageLoader;
+};
 
-export async function fetchQuote(url: string, priorObservations: number): Promise<Quote> {
+export type AdapterId = "mock" | "jd" | "brand" | "html";
+
+export function selectAdapter(url: string): AdapterId {
+  if (url.startsWith("mock:")) return "mock";
+  const parsed = parseHttpUrl(url);
+  if (isJdHost(parsed.hostname)) return "jd";
+  if (matchBrandSite(parsed)) return "brand";
+  return "html";
+}
+
+export async function fetchQuote(url: string, priorObservations: number, options?: FetchQuoteOptions): Promise<Quote> {
   if (url.startsWith("mock:")) return quoteMock(url, priorObservations);
-  if (url.startsWith("http://") || url.startsWith("https://")) return fetchHtmlQuote(url);
-  throw new Error("只支持 mock:// 或 http(s) 链接");
+  const parsed = parseHttpUrl(url);
+  const load = options?.loadPage ?? loadPage;
+  if (isJdHost(parsed.hostname)) return quoteJd(parsed, load);
+  const brand = matchBrandSite(parsed);
+  if (brand) return quoteBrand(parsed, brand, load);
+  return quoteHtml(parsed, load);
 }
 
 export function assertWatchUrl(url: string) {
@@ -15,6 +34,10 @@ export function assertWatchUrl(url: string) {
     if (!findMockProduct(url)) throw new Error("未知的演示商品");
     return;
   }
+  parseHttpUrl(url);
+}
+
+function parseHttpUrl(url: string) {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -24,40 +47,5 @@ export function assertWatchUrl(url: string) {
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new Error("只支持 mock:// 或 http(s) 链接");
   }
-}
-
-export async function fetchHtmlQuote(url: string): Promise<Quote> {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    throw new Error("请输入有效链接");
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new Error("只支持 http(s) 链接");
-  }
-
-  const response = await fetch(parsed, {
-    redirect: "follow",
-    signal: AbortSignal.timeout(12_000),
-    headers: {
-      accept: "text/html,application/xhtml+xml",
-      "user-agent": "JiaDingDing/0.1 (price watch)",
-    },
-  });
-  if (!response.ok) throw new Error(`页面返回 HTTP ${response.status}`);
-
-  const buffer = await response.arrayBuffer();
-  if (buffer.byteLength > MAX_HTML_BYTES) throw new Error("页面过大，无法解析");
-  const html = new TextDecoder("utf-8", { fatal: false }).decode(buffer);
-  const parsedPrice = parseHtmlPrice(html);
-  if (parsedPrice.price == null) throw new Error("页面里没有解析到价格");
-
-  return {
-    title: parsedPrice.title || parsed.hostname,
-    salePrice: parsedPrice.price,
-    listPrice: null,
-    currency: "CNY",
-    source: "html",
-  };
+  return parsed;
 }

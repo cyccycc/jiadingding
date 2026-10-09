@@ -5,51 +5,157 @@ export type HtmlPrice = {
   price: number | null;
 };
 
+export type StructuredPrice = {
+  title: string | null;
+  price: number | null;
+  listPrice: number | null;
+  currency: string | null;
+};
+
+type OfferHit = {
+  price: number;
+  listPrice: number | null;
+  currency: string | null;
+};
+
 export function parseHtmlPrice(html: string): HtmlPrice {
+  const structured = parseStructuredPrice(html);
+  return { title: structured.title, price: structured.price };
+}
+
+export function parseStructuredPrice(html: string): StructuredPrice {
   const jsonLd = readJsonLd(html);
   const title = jsonLd.title ?? readMeta(html, "og:title") ?? readTitle(html);
-  if (jsonLd.price != null) return { title, price: jsonLd.price };
+  if (jsonLd.offer) {
+    return {
+      title,
+      price: jsonLd.offer.price,
+      listPrice: jsonLd.offer.listPrice,
+      currency: jsonLd.offer.currency,
+    };
+  }
 
-  const productAmount = parseAmount(readMeta(html, "product:price:amount"));
-  if (productAmount != null) return { title, price: productAmount };
+  const productAmount = positiveAmount(readMeta(html, "product:price:amount"));
+  if (productAmount != null) {
+    const original = positiveAmount(readMeta(html, "product:original_price:amount"));
+    return {
+      title,
+      price: productAmount,
+      listPrice: original != null && original > productAmount ? original : null,
+      currency: normalizeCurrency(readMeta(html, "product:price:currency")),
+    };
+  }
 
-  const openGraphAmount = parseAmount(readMeta(html, "og:price:amount"));
-  if (openGraphAmount != null) return { title, price: openGraphAmount };
+  const openGraphAmount = positiveAmount(readMeta(html, "og:price:amount"));
+  if (openGraphAmount != null) {
+    return {
+      title,
+      price: openGraphAmount,
+      listPrice: null,
+      currency: normalizeCurrency(readMeta(html, "og:price:currency")),
+    };
+  }
 
-  return { title, price: readItemPropPrice(html) };
+  const item = readItemPropPrice(html);
+  if (item) return { title, price: item.price, listPrice: null, currency: item.currency };
+  return { title, price: null, listPrice: null, currency: null };
 }
 
 function readJsonLd(html: string) {
-  const found: { title: string | null; price: number | null } = { title: null, price: null };
+  const state: { title: string | null; offers: OfferHit[] } = { title: null, offers: [] };
   const pattern = /<script\b[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
   for (const match of html.matchAll(pattern)) {
-    try {
-      collectJsonLd(JSON.parse(match[1]), found);
-    } catch {
-      continue;
-    }
-    if (found.price != null && found.title) break;
+    const parsed = parseJsonLd(match[1]);
+    if (parsed != null) collectJsonLd(parsed, state, false);
   }
-  return found;
+  return { title: state.title, offer: pickOffer(state.offers) };
 }
 
-function collectJsonLd(node: unknown, found: { title: string | null; price: number | null }) {
+function parseJsonLd(raw: string) {
+  const text = raw.trim().replace(/^<!--/, "").replace(/-->$/, "").trim();
+  try {
+    return JSON.parse(text);
+  } catch {
+    try {
+      return JSON.parse(decodeHtml(text));
+    } catch {
+      return null;
+    }
+  }
+}
+
+function collectJsonLd(node: unknown, state: { title: string | null; offers: OfferHit[] }, inOffer: boolean) {
   if (Array.isArray(node)) {
-    for (const item of node) collectJsonLd(item, found);
+    for (const item of node) collectJsonLd(item, state, inOffer);
     return;
   }
   if (!node || typeof node !== "object") return;
   const record = node as Record<string, unknown>;
-  if (record["@graph"]) collectJsonLd(record["@graph"], found);
+  if (record["@graph"]) collectJsonLd(record["@graph"], state, false);
 
   const types = jsonTypes(record["@type"]);
-  if (!found.title && types.some((type) => type === "Product" || type.endsWith("Product"))) {
-    if (typeof record.name === "string") found.title = decodeHtml(record.name);
+  if (!state.title && types.some((type) => type === "Product" || type.endsWith("Product"))) {
+    if (typeof record.name === "string") state.title = decodeHtml(record.name).trim() || null;
   }
-  if (found.price == null && types.some((type) => OFFER_TYPES.has(type) || type.endsWith("Offer"))) {
-    found.price = parseAmount(record.price) ?? parseAmount(record.lowPrice);
+
+  const typedOffer = types.some((type) => OFFER_TYPES.has(type) || type.endsWith("Offer"));
+  if (typedOffer || inOffer) {
+    const hit = offerFromRecord(record);
+    if (hit) state.offers.push(hit);
   }
-  if (record.offers) collectJsonLd(record.offers, found);
+  if (record.offers) collectJsonLd(record.offers, state, true);
+}
+
+function offerFromRecord(record: Record<string, unknown>): OfferHit | null {
+  const spec = readPriceSpec(record.priceSpecification);
+  const direct = positiveAmount(record.price) ?? positiveAmount(record.lowPrice);
+  const high = positiveAmount(record.highPrice);
+  const price = direct ?? spec.sale ?? spec.list ?? high;
+  if (price == null) return null;
+  const listCandidate = spec.list ?? high;
+  const currency = direct != null
+    ? normalizeCurrency(record.priceCurrency) ?? spec.currency
+    : spec.currency ?? normalizeCurrency(record.priceCurrency);
+  return {
+    price,
+    listPrice: listCandidate != null && listCandidate > price ? listCandidate : null,
+    currency,
+  };
+}
+
+function readPriceSpec(node: unknown) {
+  const found = { sale: null as number | null, list: null as number | null, currency: null as string | null };
+  walk(node);
+  return found;
+
+  function walk(value: unknown) {
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item);
+      return;
+    }
+    if (!value || typeof value !== "object") return;
+    const record = value as Record<string, unknown>;
+    const amount = positiveAmount(record.price);
+    const currency = normalizeCurrency(record.priceCurrency);
+    if (currency && !found.currency) found.currency = currency;
+    if (amount == null) return;
+    if (priceKind(record.priceType) === "list") {
+      if (found.list == null) found.list = amount;
+      return;
+    }
+    if (found.sale == null) found.sale = amount;
+  }
+}
+
+function priceKind(value: unknown) {
+  if (typeof value !== "string") return null;
+  if (/ListPrice|MSRP|RegularPrice|StrikethroughPrice/i.test(value)) return "list" as const;
+  if (/SalePrice/i.test(value)) return "sale" as const;
+  return null;
+}
+
+function pickOffer(offers: OfferHit[]) {
+  return offers.find((offer) => offer.currency == null || offer.currency === "CNY") ?? offers[0] ?? null;
 }
 
 function jsonTypes(value: unknown) {
@@ -63,18 +169,22 @@ function readMeta(html: string, key: string) {
   for (const tag of tags) {
     const attrs = parseAttributes(tag);
     const name = attrs.property || attrs.name || attrs.itemprop;
-    if (name?.toLowerCase() === key.toLowerCase() && attrs.content) {
-      return decodeHtml(attrs.content);
-    }
+    if (name?.toLowerCase() === key.toLowerCase() && attrs.content) return decodeHtml(attrs.content);
   }
   return null;
 }
 
 function readItemPropPrice(html: string) {
+  const currency = normalizeCurrency(readMeta(html, "pricecurrency"));
   const tags = html.match(/<[a-z0-9]+\b[^>]*\bitemprop\s*=\s*["']price["'][^>]*>/gi) ?? [];
   for (const tag of tags) {
-    const amount = parseAmount(decodeHtml(parseAttributes(tag).content ?? ""));
-    if (amount != null) return amount;
+    const amount = positiveAmount(decodeHtml(parseAttributes(tag).content ?? ""));
+    if (amount != null) return { price: amount, currency };
+  }
+  const textPattern = /<([a-z0-9]+)\b[^>]*\bitemprop\s*=\s*["']price["'][^>]*>([\s\S]*?)<\/\1>/gi;
+  for (const match of html.matchAll(textPattern)) {
+    const amount = positiveAmount(decodeHtml(match[2].replace(/<[^>]+>/g, " ")));
+    if (amount != null) return { price: amount, currency };
   }
   return null;
 }
@@ -102,6 +212,20 @@ export function parseAmount(raw: unknown) {
   if (!cleaned) return null;
   const amount = Number(cleaned);
   return Number.isFinite(amount) ? amount : null;
+}
+
+export function positiveAmount(raw: unknown) {
+  const amount = parseAmount(raw);
+  if (amount == null || amount <= 0 || amount >= 100_000_000) return null;
+  return Math.round(amount * 100) / 100;
+}
+
+function normalizeCurrency(raw: unknown) {
+  if (typeof raw !== "string") return null;
+  const value = decodeHtml(raw).trim().toUpperCase();
+  if (!value) return null;
+  if (value === "¥" || value === "￥" || value === "元" || value === "RMB" || value === "CNH") return "CNY";
+  return value;
 }
 
 function decodeHtml(value: string) {
