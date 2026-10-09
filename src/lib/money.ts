@@ -12,13 +12,16 @@ export function formatDateTime(value: Date | string | null | undefined) {
   if (!value) return "尚未检查";
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return "尚未检查";
-  return new Intl.DateTimeFormat("zh-CN", {
+  const parts = new Intl.DateTimeFormat("zh-CN", {
     timeZone: "Asia/Shanghai",
     month: "numeric",
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
-  }).format(date);
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("month")}月${part("day")}日 ${part("hour")}:${part("minute")}`;
 }
 
 export function toCents(yuan: number) {
