@@ -49,10 +49,10 @@ export function WatchForm({ defaultUrl }: { defaultUrl: string }) {
           name="url"
           required
           defaultValue={defaultUrl}
-          placeholder="mock://earbuds 或 https://..."
+          placeholder="mock://earbuds、官网商品页或 https://item.jd.com/…"
         />
         <p className="text-sm text-muted-foreground">
-          演示商品：mock://earbuds、mock://kettle、mock://keyboard、mock://lamp。网页商品支持 JSON-LD、product:price:amount、og:price:amount、itemprop=price。
+          演示商品：mock://earbuds、mock://kettle、mock://keyboard、mock://lamp。品牌官网读取 JSON-LD Offer、og:price、itemprop=&quot;price&quot;，例如 Apple 的 /shop/buy-…。京东请用 item.jd.com/商品号.html。需要登录或触发风控时会提示暂无法抓取。
         </p>
       </div>
 

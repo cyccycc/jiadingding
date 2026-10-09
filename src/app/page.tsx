@@ -2,6 +2,8 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { BRAND_SITES } from "@/lib/prices/adapters/brand";
+import { JD_PRODUCT_URLS } from "@/lib/prices/adapters/jd";
 import { MOCK_PRODUCTS } from "@/lib/prices/mock";
 import { formatYuan } from "@/lib/money";
 
@@ -12,6 +14,11 @@ const steps = [
 ];
 
 export default function HomePage() {
+  const apple = BRAND_SITES.find((site) => site.id === "apple-cn");
+  const otherBrands = BRAND_SITES.filter((site) => site.id !== "apple-cn" && site.id !== "apple")
+    .map((site) => site.name)
+    .join("、");
+  const jdExample = JD_PRODUCT_URLS[0];
   return (
     <main>
       <section className="mx-auto grid max-w-5xl items-center gap-10 px-5 py-14 md:grid-cols-[1.15fr_0.85fr] md:py-20">
@@ -88,6 +95,36 @@ export default function HomePage() {
             </Card>
           ))}
         </div>
+      </section>
+
+      <section className="mx-auto max-w-5xl px-5 pb-16">
+        <h2 className="font-serif text-3xl">真实店铺</h2>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+          品牌官网和京东商品页也可以贴。只读页面上已经公开的标价。需要登录，或者页面要求验证时，会写明暂无法抓取。
+        </p>
+        <div className="mt-6 grid gap-4 sm:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Apple 中国</CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-2 text-sm">
+              <p className="text-muted-foreground">买页或商品页。标价要在 JSON-LD、og:price 或 itemprop 里。常见路径：{apple?.paths}</p>
+              <p className="break-all font-mono text-xs text-muted-foreground">{apple?.example}</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">京东</CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-2 text-sm">
+              <p className="text-muted-foreground">用 item.jd.com 这种商品页。登录墙和风控页不会硬闯。下面只是链接格式。</p>
+              <p className="break-all font-mono text-xs text-muted-foreground">{jdExample.example}</p>
+            </CardContent>
+          </Card>
+        </div>
+        <p className="mt-4 text-sm leading-6 text-muted-foreground">
+          {otherBrands}也按公开标价读取。Apple 国际站只接受人民币标价。
+        </p>
       </section>
     </main>
   );

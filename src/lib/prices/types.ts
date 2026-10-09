@@ -3,5 +3,5 @@ export type Quote = {
   salePrice: number;
   listPrice: number | null;
   currency: "CNY";
-  source: "mock" | "html";
+  source: "mock" | "html" | "brand" | "jd";
 };

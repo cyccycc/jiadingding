@@ -7,7 +7,7 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx --test src/lib/rules.test.ts src/lib/html-price.test.ts src/lib/notify-flow.test.ts",
+    "test": "tsx --test src/lib/rules.test.ts src/lib/html-price.test.ts src/lib/notify-flow.test.ts src/lib/prices/brand.test.ts src/lib/prices/jd.test.ts src/lib/prices/fetch-quote.test.ts",
     "check-prices": "tsx scripts/check-prices.ts",
     "postinstall": "prisma generate"
   },
