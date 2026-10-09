@@ -1,0 +1,68 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  watches      Watch[]
+}
+
+model Watch {
+  id                String         @id @default(cuid())
+  userId            String
+  user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  url               String
+  title             String
+  enabled           Boolean        @default(true)
+  ruleType          String
+  targetPrice       Float?
+  dropPercent       Float?
+  joinPrice         Float?
+  lastPrice         Float?
+  lastListPrice     Float?
+  lastCheckedAt     DateTime?
+  lastNotifiedPrice Float?
+  currency          String         @default("CNY")
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  checks            PriceCheck[]
+  notifications     Notification[]
+
+  @@index([userId])
+  @@index([enabled])
+}
+
+model PriceCheck {
+  id        String   @id @default(cuid())
+  watchId   String
+  watch     Watch    @relation(fields: [watchId], references: [id], onDelete: Cascade)
+  salePrice Float?
+  listPrice Float?
+  ok        Boolean
+  error     String?
+  checkedAt DateTime @default(now())
+
+  @@index([watchId, checkedAt])
+}
+
+model Notification {
+  id         String   @id @default(cuid())
+  watchId    String
+  watch      Watch    @relation(fields: [watchId], references: [id], onDelete: Cascade)
+  salePrice  Float
+  channel    String
+  subject    String
+  body       String
+  outboxPath String?
+  createdAt  DateTime @default(now())
+
+  @@index([watchId, createdAt])
+}
